@@ -227,7 +227,7 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
             consumptions = await self.hass.async_add_executor_job(
                 self._api.consumptions,
                 LAST_WEEK,
-                TODAY + timedelta(days=1),
+                TODAY,
                 self.contract,
             )
         except ConfigEntryAuthFailed as exp:
@@ -251,7 +251,7 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
                     consumptions = await self.hass.async_add_executor_job(
                         self._api.consumptions,
                         LAST_WEEK,
-                        TODAY + timedelta(days=1),
+                        TODAY,
                         self.contract,
                     )
                 except Exception as retry_exp:
