@@ -67,7 +67,7 @@ Cada factura se reparte por horas dentro de su periodo de facturación:
 - La parte fija (cuota de servicio, tasas de residuos TMTR/TRR...) se reparte por igual entre todas las horas.
 - La parte variable (consumo, canon del agua, alcantarillado y su IVA) sigue el consumo horario importado. Las horas sin datos de consumo reciben una parte igual.
 
-Los costes solo aparecen cuando se emite la factura, así que el periodo en curso no tiene coste hasta entonces. Las facturas rectificativas y abonos no se tienen en cuenta: si dos facturas se solapan, se avisa en el registro. Las facturas se consultan una vez al día. Requiere Home Assistant 2024.11 o posterior.
+Los costes solo se importan por meses completos: el mes en que acaba la última factura se importa cuando la siguiente factura lo completa, así que ningún mes muestra un coste parcial. Las facturas rectificativas y abonos no se tienen en cuenta: si dos facturas se solapan, se avisa en el registro. Las facturas se consultan una vez al día. Requiere Home Assistant 2024.11 o posterior.
 
 ## Ayuda
 
