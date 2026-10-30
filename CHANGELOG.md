@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.2]
+
+### Fixed
+
+- Huge negative/positive spikes in water statistics: the sensor reported 0 when it had no reading yet (at startup, or while the API returned no data), which Home Assistant recorded as the meter dropping to 0. It now restores the last reading after a restart and stays unknown otherwise
+
 ## [0.6.1]
 
 ### Fixed

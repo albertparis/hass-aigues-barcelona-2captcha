@@ -24,8 +24,8 @@ try:
 except ImportError:
     # Fallback for older HA versions
     UNIT_CLASS_VOLUME = "volume"
+from homeassistant.components.sensor import RestoreSensor
 from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import CONF_PASSWORD
 from homeassistant.const import CONF_STATE
@@ -935,7 +935,7 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
             self._import_in_progress = False
 
 
-class ContadorAgua(CoordinatorEntity, SensorEntity):
+class ContadorAgua(CoordinatorEntity, RestoreSensor):
     """Representation of a sensor."""
 
     def __init__(self, coordinator) -> None:
@@ -949,6 +949,14 @@ class ContadorAgua(CoordinatorEntity, SensorEntity):
         self._attr_device_class = SensorDeviceClass.WATER
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
+        self._restored_value = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_data = await self.async_get_last_sensor_data()
+        # Skip a restored 0 left over from older versions that reported 0.0 without data
+        if last_data is not None and last_data.native_value:
+            self._restored_value = last_data.native_value
 
     @property
     def native_value(self):
@@ -957,15 +965,10 @@ class ContadorAgua(CoordinatorEntity, SensorEntity):
         if value is not None:
             return value
 
-        # Fallback: Use last known statistic value (similar to edata pattern)
-        last_stat = self.coordinator._last_stats_sum.get(
-            self.coordinator.statistic_id, None
-        )
-        if last_stat is not None:
-            return last_stat
-
-        # Default: Return 0.0 if no data available yet
-        return 0.0
+        # Fallback: last meter reading from before the restart. Never report 0
+        # (or the statistics sum): with state_class TOTAL any drop is recorded
+        # as negative consumption and shows up as a spike in statistics.
+        return self._restored_value
 
     @property
     def last_measurement(self):
