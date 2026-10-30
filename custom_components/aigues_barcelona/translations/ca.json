@@ -41,7 +41,7 @@
           "import_invoices": "Importa les factures"
         },
         "data_description": {
-          "import_invoices": "Importa l'import de cada factura com l'estad\u00edstica Cost <contracte>, per als costos d'aigua del tauler d'energia."
+          "import_invoices": "Importa l'import de cada factura com una estad\u00edstica anomenada Cost seguit del n\u00famero de contracte, per fer-la servir com a cost de l'aigua al tauler d'energia."
         }
       }
     }

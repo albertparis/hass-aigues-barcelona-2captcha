@@ -41,7 +41,7 @@
           "import_invoices": "Import invoices"
         },
         "data_description": {
-          "import_invoices": "Imports the cost of each invoice as the statistic Cost <contract>, for the Energy dashboard water costs."
+          "import_invoices": "Imports the cost of each invoice as a statistic named Cost followed by the contract number, to use as the water cost in the Energy dashboard."
         }
       }
     }

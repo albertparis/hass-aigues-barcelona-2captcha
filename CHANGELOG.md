@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1]
+
+### Fixed
+
+- "Translation error: UNCLOSED_TAG" under Import invoices in the integration options
+
 ## [0.7.0]
 
 ### Added
