@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Minimum Home Assistant version is now 2024.11
+- Minimum Home Assistant version is now 2024.11, which needs Python 3.12 or newer
 
 ### Fixed
 
