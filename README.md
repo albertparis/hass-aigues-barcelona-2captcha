@@ -58,6 +58,17 @@ Este servicio permite limpiar las estadísticas almacenadas y volver a importar 
 
 Esta integración es compatible con el [Panel de Energía](https://www.home-assistant.io/docs/energy/) de Home Assistant. El sensor de agua se puede agregar directamente como fuente de agua.
 
+### Costes desde las facturas
+
+Activa **Importar facturas** en *Ajustes → Dispositivos y servicios → Aigües de Barcelona → Configurar*. La integración importa cada factura como la estadística `aigues_barcelona:<contrato>_cost` (en EUR), que puedes elegir en la fuente de agua con la opción *Usar una entidad que haga seguimiento de los costes totales*.
+
+Cada factura se reparte por horas dentro de su periodo de facturación:
+
+- La parte fija (cuota de servicio, tasas de residuos TMTR/TRR...) se reparte por igual entre todas las horas.
+- La parte variable (consumo, canon del agua, alcantarillado y su IVA) sigue el consumo horario importado. Las horas sin datos de consumo reciben una parte igual.
+
+Los costes solo aparecen cuando se emite la factura, así que el periodo en curso no tiene coste hasta entonces. Las facturas rectificativas y abonos no se tienen en cuenta: si dos facturas se solapan, se avisa en el registro. Las facturas se consultan una vez al día. Requiere Home Assistant 2024.11 o posterior.
+
 ## Ayuda
 
 No soy un experto en Home Assistant, hay conceptos que son nuevos para mí en cuanto a la parte Developer. Así que puede que tarde en implementar las nuevas requests.
@@ -72,6 +83,7 @@ Si encuentras algún error, puedes abrir un Issue.
 - [x] Soportar múltiples contratos
 - [x] Publicar el consumo en [Energía](https://www.home-assistant.io/docs/energy/)
 - [x] Login automático con 2Captcha
+- [x] Importar los costes de las facturas
 
 ## Agradecimientos
 

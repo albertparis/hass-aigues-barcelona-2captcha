@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0]
+
+### Added
+
+- Optional invoice import (Configure → Import invoices): imports each invoice as the cost statistic `aigues_barcelona:<contract>_cost` for the Energy dashboard water costs. The fixed part of each invoice is spread evenly over its billing period and the volume part follows the hourly consumption
+- The `aigues_barcelona.reset_and_refresh_data` service also clears and reimports the cost statistic
+- Warning in the logs when two invoices overlap (a corrected invoice or credit note), since the cost import only counts the first one
+
+### Changed
+
+- Minimum Home Assistant version is now 2024.11, which needs Python 3.12 or newer
+
+### Fixed
+
+- `aigues_barcelona.reset_and_refresh_data` failed with a TypeError after queueing the statistics deletion
+
 ## [0.6.2]
 
 ### Fixed

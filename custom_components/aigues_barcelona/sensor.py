@@ -51,7 +51,15 @@ from .const import CONF_VALUE
 from .const import DEFAULT_SCAN_PERIOD
 from .const import DOMAIN
 from .const import CONF_2CAPTCHA_APIKEY
+from .const import CONF_IMPORT_INVOICES
+from .const import INVOICE_CHECK_PERIOD
+from .const import INVOICE_LOOKBACK_MONTHS
 from .const import STAT_ID_CONSUMPTION
+from .const import STAT_ID_COST
+from .costs import hourly_costs
+from .costs import invoice_period
+from .costs import overlapping_periods
+from .costs import split_invoice_amount
 
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -77,6 +85,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry, async_add_entitie
     twocaptcha_api_key = config_entry.data.get(CONF_2CAPTCHA_APIKEY, "")
     contracts = config_entry.data[CONF_CONTRACT]
     token = config_entry.data.get("token")
+    import_invoices = config_entry.options.get(CONF_IMPORT_INVOICES, False)
 
     contadores = list()
 
@@ -89,6 +98,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry, async_add_entitie
             contract,
             token=token,
             entry_id=config_entry.entry_id,
+            import_invoices=import_invoices,
         )
         contadores.append(ContadorAgua(coordinator))
 
@@ -122,11 +132,15 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
         token: str,
         entry_id: str,
         prev_data=None,
+        import_invoices: bool = False,
     ) -> None:
         """Initialize the data handler."""
         self.reset = prev_data is None
 
         self._import_in_progress = False
+        self.import_invoices = import_invoices
+        self._last_invoice_check: Optional[datetime] = None
+        self._warned_overlaps: Set[Tuple[datetime, datetime]] = set()
 
         # Track last statistics sum and datetime to maintain continuity
         self._last_stats_sum: dict[str, float] = {}
@@ -136,6 +150,7 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
         self.id = contract.lower()
         # Use domain prefix for external statistics (required for Energy Dashboard)
         self.statistic_id = STAT_ID_CONSUMPTION(self.id)
+        self.cost_statistic_id = STAT_ID_COST(self.id)
         self.entry_id = entry_id
 
         if not hass.data[DOMAIN].get(self.contract):
@@ -266,6 +281,7 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
 
         if not consumptions:
             _LOGGER.error("No consumptions available")
+            await self._async_check_invoices(TODAY)
             return False
 
         self._data["consumptions"] = consumptions
@@ -282,6 +298,8 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
             await self._async_import_statistics(consumptions, fill_to_now=True)
         except Exception:
             _LOGGER.exception("Failed to import statistics")
+
+        await self._async_check_invoices(TODAY)
 
         # Note: We no longer import historical consumptions to avoid conflicts with HA recorder
         # if LAST_TIME_DAYS and LAST_TIME_DAYS >= 7:
@@ -739,6 +757,154 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
         finally:
             self._import_in_progress = False
 
+    async def _async_check_invoices(self, now: datetime) -> None:
+        """Import invoice costs, at most once a day."""
+        if not self.import_invoices:
+            return
+        # Invoices only change every couple of months
+        if self._last_invoice_check and now - self._last_invoice_check < timedelta(
+            seconds=INVOICE_CHECK_PERIOD
+        ):
+            return
+        try:
+            await self._async_import_cost_statistics()
+            self._last_invoice_check = now
+        except Exception:
+            _LOGGER.exception("Failed to import invoice costs")
+
+    def _warn_overlapping_invoices(
+        self, periods: List[Tuple[datetime, datetime]]
+    ) -> None:
+        """Warn once per period about invoices the cost import may skip."""
+        for previous, period in overlapping_periods(periods):
+            if period in self._warned_overlaps:
+                continue
+            self._warned_overlaps.add(period)
+            _LOGGER.warning(
+                "%s: invoice for %s - %s overlaps the one for %s - %s. It may be "
+                "a corrected invoice or a credit note, which the cost import "
+                "doesn't handle: its amount may be missing from the costs",
+                self.contract,
+                period[0].date(),
+                period[1].date(),
+                previous[0].date(),
+                previous[1].date(),
+            )
+
+    def _get_cost_statistics_metadata(self) -> StatisticMetaData:
+        """Return metadata for the invoice cost statistics."""
+        return StatisticMetaData(
+            has_mean=False,
+            has_sum=True,
+            mean_type=StatisticMeanType.NONE if StatisticMeanType else 0,
+            name=f"Cost {self.id}",
+            source=DOMAIN,
+            statistic_id=self.cost_statistic_id,
+            unit_class=None,
+            unit_of_measurement="EUR",
+        )
+
+    async def _get_hourly_consumption(
+        self, start: datetime, end: datetime
+    ) -> Dict[datetime, float]:
+        """Return the imported consumption per UTC hour in [start, end).
+
+        Hours without imported data are left out.
+        """
+        stats = await get_db_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass,
+            start,
+            end,
+            {self.statistic_id},
+            "hour",
+            None,
+            {"change"},
+        )
+        hourly = {}
+        for stat in stats.get(self.statistic_id, []):
+            if stat.get("change") is not None:
+                hourly[dt_util.utc_from_timestamp(stat["start"])] = stat["change"]
+        return hourly
+
+    async def _async_import_cost_statistics(self) -> None:
+        """Import invoice amounts as an hourly cost statistic.
+
+        Each invoice's fixed part is spread evenly over its billing
+        period and its volume part follows the imported hourly
+        consumption. Only periods after the last imported cost are
+        added, continuing its sum.
+        """
+        last_stats = await get_db_instance(self.hass).async_add_executor_job(
+            get_last_statistics,
+            self.hass,
+            1,
+            self.cost_statistic_id,
+            True,
+            {"sum"},
+        )
+        last_rows = last_stats.get(self.cost_statistic_id)
+        last_end = (
+            dt_util.utc_from_timestamp(last_rows[0]["end"]) if last_rows else None
+        )
+        cost_sum = (last_rows[0].get("sum") or 0.0) if last_rows else 0.0
+
+        invoices = await self.hass.async_add_executor_job(
+            self._api.invoices, self.contract, None, INVOICE_LOOKBACK_MONTHS
+        )
+        if not invoices:
+            _LOGGER.debug("No invoices available for %s", self.contract)
+            return
+
+        tz = dt_util.get_default_time_zone()
+        now = dt_util.now()
+        periods = []
+        for invoice in invoices:
+            try:
+                start, end = invoice_period(invoice, tz)
+            except (KeyError, TypeError, ValueError):
+                _LOGGER.debug("Skipping invoice without a billing period")
+                continue
+            if end > now:
+                _LOGGER.debug("Skipping invoice for a period not over yet")
+                continue
+            periods.append(((start, end), invoice))
+        periods.sort(key=lambda item: item[0])
+        self._warn_overlapping_invoices([period for period, _ in periods])
+
+        new_stats = []
+        for (start, end), invoice in periods:
+            if last_end and end <= last_end:
+                continue
+            # Never rewrite hours already imported: a period overlapping the
+            # previous one is spread over its remaining hours
+            if last_end and start < last_end:
+                start = last_end
+
+            fixed, variable = split_invoice_amount(invoice)
+            hourly_consumption = await self._get_hourly_consumption(start, end)
+            for hour, cost in hourly_costs(
+                start, end, fixed, variable, hourly_consumption
+            ):
+                cost_sum += cost
+                new_stats.append(
+                    StatisticData(
+                        start=hour, state=round(cost, 4), sum=round(cost_sum, 4)
+                    )
+                )
+            last_end = end
+
+        if new_stats:
+            _LOGGER.info(
+                "Importing %d hourly cost points for %s (sum=%.2f)",
+                len(new_stats),
+                self.contract,
+                cost_sum,
+            )
+            async_add_external_statistics(
+                self.hass, self._get_cost_statistics_metadata(), new_stats
+            )
+
     async def clear_all_stored_data(self) -> None:
         """Clear all stored statistics from database and tracking data."""
         _LOGGER.warning(
@@ -750,12 +916,14 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
             list_statistic_ids, self.hass
         )
         to_clear = [
-            x["statistic_id"] for x in all_ids if x["statistic_id"] == self.statistic_id
+            x["statistic_id"]
+            for x in all_ids
+            if x["statistic_id"] in (self.statistic_id, self.cost_statistic_id)
         ]
 
         if to_clear:
             # Delete statistics from database
-            await get_db_instance(self.hass).async_clear_statistics(to_clear)
+            get_db_instance(self.hass).async_clear_statistics(to_clear)
             _LOGGER.info(
                 "Deleted statistics from database for %s: %s", self.contract, to_clear
             )
@@ -763,6 +931,7 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
         # Clear in-memory tracking
         self._last_stats_sum = {}
         self._last_stats_dt = {}
+        self._last_invoice_check = None
 
     async def import_old_consumptions(self, days: int = 365) -> None:
         """Import historical consumption data with HOURLY granularity.

@@ -32,5 +32,18 @@
         "description": "Since Aig\u00fces de Barcelona uses Recaptcha, you'll need to provide the Token manually.\nPlease paste the token string here (starts with ey....)"
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "import_invoices": "Import invoices"
+        },
+        "data_description": {
+          "import_invoices": "Imports the cost of each invoice as the statistic Cost <contract>, for the Energy dashboard water costs."
+        }
+      }
+    }
   }
 }
