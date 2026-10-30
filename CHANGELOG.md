@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1]
+
+### Fixed
+
+- Sensor stuck at 0 with "No consumptions available": request consumptions up to today instead of tomorrow, since the API returns an empty list for future end dates
+
 ## [0.6.0]
 
 ### Added
