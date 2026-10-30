@@ -58,6 +58,7 @@ from .const import STAT_ID_CONSUMPTION
 from .const import STAT_ID_COST
 from .costs import hourly_costs
 from .costs import invoice_period
+from .costs import month_start
 from .costs import overlapping_periods
 from .costs import split_invoice_amount
 
@@ -832,8 +833,11 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
 
         Each invoice's fixed part is spread evenly over its billing
         period and its volume part follows the imported hourly
-        consumption. Only periods after the last imported cost are
-        added, continuing its sum.
+        consumption. Costs are only written up to the start of the month
+        the last invoice ends in, so no month shows a partial cost; the
+        rest is written once the next invoice completes that month. Only
+        hours after the last imported cost are added, continuing its
+        sum.
         """
         last_stats = await get_db_instance(self.hass).async_add_executor_job(
             get_last_statistics,
@@ -869,30 +873,36 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
                 _LOGGER.debug("Skipping invoice for a period not over yet")
                 continue
             periods.append(((start, end), invoice))
+        if not periods:
+            return
         periods.sort(key=lambda item: item[0])
         self._warn_overlapping_invoices([period for period, _ in periods])
 
+        cutoff = month_start(max(end for (_, end), _ in periods))
+        # First hour without a cost yet; overlapping invoices never write
+        # the same hour twice
+        next_hour = last_end
         new_stats = []
         for (start, end), invoice in periods:
-            if last_end and end <= last_end:
+            if start >= cutoff or (next_hour and end <= next_hour):
                 continue
-            # Never rewrite hours already imported: a period overlapping the
-            # previous one is spread over its remaining hours
-            if last_end and start < last_end:
-                start = last_end
 
+            # Spread the invoice over its whole period, then write only the
+            # hours not imported yet and before the cutoff
             fixed, variable = split_invoice_amount(invoice)
             hourly_consumption = await self._get_hourly_consumption(start, end)
             for hour, cost in hourly_costs(
                 start, end, fixed, variable, hourly_consumption
             ):
+                if hour >= cutoff or (next_hour and hour < next_hour):
+                    continue
                 cost_sum += cost
                 new_stats.append(
                     StatisticData(
                         start=hour, state=round(cost, 4), sum=round(cost_sum, 4)
                     )
                 )
-            last_end = end
+                next_hour = hour + timedelta(hours=1)
 
         if new_stats:
             _LOGGER.info(

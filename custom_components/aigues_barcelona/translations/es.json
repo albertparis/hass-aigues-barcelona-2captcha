@@ -41,7 +41,7 @@
           "import_invoices": "Importar facturas"
         },
         "data_description": {
-          "import_invoices": "Importa el importe de cada factura como la estad\u00edstica Cost <contrato>, para los costes de agua del panel de energ\u00eda."
+          "import_invoices": "Importa el importe de cada factura como una estad\u00edstica llamada Cost seguido del n\u00famero de contrato, para usarla como coste del agua en el panel de energ\u00eda."
         }
       }
     }

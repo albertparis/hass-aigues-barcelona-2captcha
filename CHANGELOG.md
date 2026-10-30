@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1]
+
+### Changed
+
+- Invoice costs are only imported for whole months: the month the last invoice ends in waits until the next invoice completes it, instead of showing a partial cost
+
+### Fixed
+
+- "Translation error: UNCLOSED_TAG" under Import invoices in the integration options
+
 ## [0.7.0]
 
 ### Added

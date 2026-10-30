@@ -26,6 +26,11 @@ def invoice_period(invoice: Dict, tz: tzinfo) -> Tuple[datetime, datetime]:
     return start.replace(tzinfo=tz), end.replace(tzinfo=tz)
 
 
+def month_start(moment: datetime) -> datetime:
+    """Return local midnight on the first day of the month of moment."""
+    return moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
 def overlapping_periods(
     periods: List[Tuple[datetime, datetime]],
 ) -> List[Tuple[Tuple[datetime, datetime], Tuple[datetime, datetime]]]:

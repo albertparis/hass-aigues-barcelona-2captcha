@@ -10,6 +10,7 @@ import pytest
 from custom_components.aigues_barcelona.costs import (
     hourly_costs,
     invoice_period,
+    month_start,
     overlapping_periods,
     split_invoice_amount,
 )
@@ -44,6 +45,18 @@ class TestInvoicePeriod:
         assert start == datetime(2026, 7, 9, tzinfo=MADRID)
         assert end == datetime(2026, 9, 8, tzinfo=MADRID)
         assert (end - start).days == INVOICE["consumptionDays"]
+
+
+class TestMonthStart:
+    def test_mid_month(self):
+        moment = datetime(2026, 9, 8, tzinfo=MADRID)
+
+        assert month_start(moment) == datetime(2026, 9, 1, tzinfo=MADRID)
+
+    def test_first_of_month_is_kept(self):
+        moment = datetime(2026, 10, 1, tzinfo=MADRID)
+
+        assert month_start(moment) == moment
 
 
 class TestOverlappingPeriods:
@@ -225,51 +238,64 @@ class TestImportCostStatistics:
     def _invoice(start, end, amount):
         return {"startDate": start, "endDate": end, "amount": amount}
 
-    async def test_first_import_covers_all_invoices(self):
+    async def test_first_import_stops_at_month_start(self):
         invoices = [
-            self._invoice("08-09-2026", "10-09-2026", 48.0),
-            self._invoice("06-09-2026", "08-09-2026", 24.0),
+            self._invoice("01-09-2026", "03-09-2026", 48.0),
+            self._invoice("30-08-2026", "01-09-2026", 24.0),
+        ]
+
+        add_stats = await self._run(invoices, {})
+
+        # September is only partly invoiced: it waits for the next invoice
+        stats = add_stats.call_args.args[2]
+        assert len(stats) == 48
+        assert stats[0]["start"] == datetime(2026, 8, 29, 22, tzinfo=timezone.utc)
+        assert stats[-1]["start"] == datetime(2026, 8, 31, 21, tzinfo=timezone.utc)
+        assert stats[-1]["sum"] == pytest.approx(24.0)
+
+    async def test_partial_month_waits_for_next_invoice(self):
+        invoices = [self._invoice("06-09-2026", "08-09-2026", 24.0)]
+
+        add_stats = await self._run(invoices, {})
+
+        add_stats.assert_not_called()
+
+    async def test_month_completed_by_next_invoice(self):
+        # A previous run wrote the August part of the first invoice
+        invoices = [
+            self._invoice("30-08-2026", "02-09-2026", 72.0),
+            self._invoice("02-09-2026", "01-10-2026", 696.0),
+        ]
+        last_end = datetime(2026, 9, 1, tzinfo=MADRID).timestamp()
+        last_stats = {"aigues_barcelona:123_cost": [{"end": last_end, "sum": 48.0}]}
+
+        add_stats = await self._run(invoices, last_stats)
+
+        # 1 September from the first invoice, then the whole second one
+        stats = add_stats.call_args.args[2]
+        assert len(stats) == 24 + 696
+        assert stats[0]["start"] == datetime(2026, 8, 31, 22, tzinfo=timezone.utc)
+        assert stats[23]["sum"] == pytest.approx(72.0)
+        assert stats[-1]["sum"] == pytest.approx(768.0)
+
+    async def test_overlapping_invoices_write_each_hour_once(self):
+        invoices = [
+            self._invoice("30-08-2026", "01-09-2026", 24.0),
+            self._invoice("30-08-2026", "01-09-2026", -24.0),
         ]
 
         add_stats = await self._run(invoices, {})
 
         stats = add_stats.call_args.args[2]
-        assert len(stats) == 96
-        assert stats[0]["start"] == datetime(2026, 9, 5, 22, tzinfo=timezone.utc)
-        assert stats[47]["sum"] == pytest.approx(24.0)
-        assert stats[-1]["sum"] == pytest.approx(72.0)
-
-    async def test_resumes_after_last_imported_cost(self):
-        invoices = [
-            self._invoice("06-09-2026", "08-09-2026", 24.0),
-            self._invoice("08-09-2026", "10-09-2026", 48.0),
-        ]
-        last_end = datetime(2026, 9, 8, tzinfo=MADRID).timestamp()
-        last_stats = {"aigues_barcelona:123_cost": [{"end": last_end, "sum": 100.0}]}
-
-        add_stats = await self._run(invoices, last_stats)
-
-        stats = add_stats.call_args.args[2]
         assert len(stats) == 48
-        assert stats[0]["start"] == datetime(2026, 9, 7, 22, tzinfo=timezone.utc)
-        assert stats[-1]["sum"] == pytest.approx(148.0)
-
-    async def test_overlapping_invoice_keeps_full_amount(self):
-        invoices = [self._invoice("07-09-2026", "10-09-2026", 30.0)]
-        last_end = datetime(2026, 9, 8, tzinfo=MADRID).timestamp()
-        last_stats = {"aigues_barcelona:123_cost": [{"end": last_end, "sum": 10.0}]}
-
-        add_stats = await self._run(invoices, last_stats)
-
-        stats = add_stats.call_args.args[2]
-        assert len(stats) == 48
-        assert stats[-1]["sum"] == pytest.approx(40.0)
+        assert len({stat["start"] for stat in stats}) == 48
+        assert stats[-1]["sum"] == pytest.approx(24.0)
 
     async def test_skips_invoices_without_period_or_not_over(self):
         invoices = [
             {"amount": 5.0},
-            self._invoice("06-09-2026", "08-09-2026", 24.0),
-            self._invoice("08-09-2026", "08-11-2099", 99.0),
+            self._invoice("30-08-2026", "01-09-2026", 24.0),
+            self._invoice("01-09-2026", "01-11-2099", 99.0),
         ]
 
         add_stats = await self._run(invoices, {})
@@ -311,8 +337,8 @@ class TestImportCostStatistics:
         assert "2026-09-06 - 2026-09-08" in warnings[0].getMessage()
 
     async def test_nothing_new(self):
-        invoices = [self._invoice("06-09-2026", "08-09-2026", 24.0)]
-        last_end = datetime(2026, 9, 8, tzinfo=MADRID).timestamp()
+        invoices = [self._invoice("30-08-2026", "01-09-2026", 24.0)]
+        last_end = datetime(2026, 9, 1, tzinfo=MADRID).timestamp()
         last_stats = {"aigues_barcelona:123_cost": [{"end": last_end, "sum": 24.0}]}
 
         add_stats = await self._run(invoices, last_stats)
