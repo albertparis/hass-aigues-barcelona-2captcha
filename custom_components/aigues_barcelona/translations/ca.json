@@ -32,5 +32,18 @@
         "description": "Com que Aig\u00fces de Barcelona utilitza Recaptcha per a iniciar sessi\u00f3, no es pot iniciar sessi\u00f3 autom\u00e0ticament des de Home Assistant, aix\u00ed que has d'iniciar sessi\u00f3 des de la web, i proporcionar el token.\nCopia i enganxa el token aqu\u00ed (comen\u00e7a per ey....)"
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcions",
+        "data": {
+          "import_invoices": "Importa les factures"
+        },
+        "data_description": {
+          "import_invoices": "Importa l'import de cada factura com l'estad\u00edstica Cost <contracte>, per als costos d'aigua del tauler d'energia."
+        }
+      }
+    }
   }
 }

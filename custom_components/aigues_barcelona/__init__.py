@@ -49,6 +49,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await setup_service(hass, entry)
 
+    # The listener also fires on token updates: only reload for new options
+    options = dict(entry.options)
+
+    async def async_reload_on_options_change(
+        hass: HomeAssistant, entry: ConfigEntry
+    ) -> None:
+        if dict(entry.options) != options:
+            await hass.config_entries.async_reload(entry.entry_id)
+
+    entry.async_on_unload(entry.add_update_listener(async_reload_on_options_change))
+
     return True
 
 

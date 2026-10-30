@@ -19,6 +19,7 @@ from .const import API_ERROR_TOKEN_REVOKED
 from .const import CONF_CONTRACT
 from .const import DOMAIN
 from .const import CONF_2CAPTCHA_APIKEY
+from .const import CONF_IMPORT_INVOICES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -98,6 +99,12 @@ async def validate_credentials(
 class AiguesBarcelonaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 2
     stored_input = dict()
+
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> AiguesBarcelonaOptionsFlow:
+        return AiguesBarcelonaOptionsFlow()
 
     async def async_step_token(
         self, user_input: dict[str, Any] | None = None
@@ -206,6 +213,30 @@ class AiguesBarcelonaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user", data_schema=ACCOUNT_CONFIG_SCHEMA, errors=errors
+        )
+
+
+class AiguesBarcelonaOptionsFlow(config_entries.OptionsFlow):
+    """Integration options."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_IMPORT_INVOICES,
+                        default=self.config_entry.options.get(
+                            CONF_IMPORT_INVOICES, False
+                        ),
+                    ): bool,
+                }
+            ),
         )
 
 
