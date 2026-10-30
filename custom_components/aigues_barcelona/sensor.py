@@ -58,6 +58,7 @@ from .const import STAT_ID_CONSUMPTION
 from .const import STAT_ID_COST
 from .costs import hourly_costs
 from .costs import invoice_period
+from .costs import overlapping_periods
 from .costs import split_invoice_amount
 
 from typing import Dict, List, Optional, Set, Tuple
@@ -139,6 +140,7 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
         self._import_in_progress = False
         self.import_invoices = import_invoices
         self._last_invoice_check: Optional[datetime] = None
+        self._warned_overlaps: Set[Tuple[datetime, datetime]] = set()
 
         # Track last statistics sum and datetime to maintain continuity
         self._last_stats_sum: dict[str, float] = {}
@@ -770,6 +772,25 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
         except Exception:
             _LOGGER.exception("Failed to import invoice costs")
 
+    def _warn_overlapping_invoices(
+        self, periods: List[Tuple[datetime, datetime]]
+    ) -> None:
+        """Warn once per period about invoices the cost import may skip."""
+        for previous, period in overlapping_periods(periods):
+            if period in self._warned_overlaps:
+                continue
+            self._warned_overlaps.add(period)
+            _LOGGER.warning(
+                "%s: invoice for %s - %s overlaps the one for %s - %s. It may be "
+                "a corrected invoice or a credit note, which the cost import "
+                "doesn't handle: its amount may be missing from the costs",
+                self.contract,
+                period[0].date(),
+                period[1].date(),
+                previous[0].date(),
+                previous[1].date(),
+            )
+
     def _get_cost_statistics_metadata(self) -> StatisticMetaData:
         """Return metadata for the invoice cost statistics."""
         return StatisticMetaData(
@@ -849,6 +870,7 @@ class ContratoAgua(TimestampDataUpdateCoordinator):
                 continue
             periods.append(((start, end), invoice))
         periods.sort(key=lambda item: item[0])
+        self._warn_overlapping_invoices([period for period, _ in periods])
 
         new_stats = []
         for (start, end), invoice in periods:

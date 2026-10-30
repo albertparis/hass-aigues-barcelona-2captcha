@@ -26,6 +26,24 @@ def invoice_period(invoice: Dict, tz: tzinfo) -> Tuple[datetime, datetime]:
     return start.replace(tzinfo=tz), end.replace(tzinfo=tz)
 
 
+def overlapping_periods(
+    periods: List[Tuple[datetime, datetime]],
+) -> List[Tuple[Tuple[datetime, datetime], Tuple[datetime, datetime]]]:
+    """Return pairs of billing periods that overlap.
+
+    Regular invoices follow each other, so an overlap means a corrected
+    invoice or a credit note, which the cost import doesn't handle.
+    """
+    overlaps = []
+    latest = None
+    for period in sorted(periods):
+        if latest and period[0] < latest[1]:
+            overlaps.append((latest, period))
+        if latest is None or period[1] > latest[1]:
+            latest = period
+    return overlaps
+
+
 def split_invoice_amount(invoice: Dict) -> Tuple[float, float]:
     """Split the invoice total into (fixed, variable) amounts.
 

@@ -10,6 +10,7 @@ import pytest
 from custom_components.aigues_barcelona.costs import (
     hourly_costs,
     invoice_period,
+    overlapping_periods,
     split_invoice_amount,
 )
 from custom_components.aigues_barcelona.sensor import ContratoAgua
@@ -43,6 +44,38 @@ class TestInvoicePeriod:
         assert start == datetime(2026, 7, 9, tzinfo=MADRID)
         assert end == datetime(2026, 9, 8, tzinfo=MADRID)
         assert (end - start).days == INVOICE["consumptionDays"]
+
+
+class TestOverlappingPeriods:
+    @staticmethod
+    def _period(start_day, end_day):
+        return (
+            datetime(2026, 7, start_day, tzinfo=MADRID),
+            datetime(2026, 7, end_day, tzinfo=MADRID),
+        )
+
+    def test_consecutive_periods_do_not_overlap(self):
+        periods = [self._period(10, 20), self._period(1, 10)]
+
+        assert overlapping_periods(periods) == []
+
+    def test_detects_overlap_and_duplicate(self):
+        first = self._period(1, 10)
+        correction = self._period(1, 10)
+        partial = self._period(5, 15)
+
+        overlaps = overlapping_periods([partial, correction, first])
+
+        assert overlaps == [(first, correction), (first, partial)]
+
+    def test_period_inside_a_longer_one(self):
+        long_period = self._period(1, 20)
+        inside = self._period(5, 8)
+        after = self._period(15, 25)
+
+        overlaps = overlapping_periods([long_period, inside, after])
+
+        assert overlaps == [(long_period, inside), (long_period, after)]
 
 
 class TestSplitInvoiceAmount:
@@ -155,6 +188,12 @@ class TestImportCostStatistics:
             _get_hourly_consumption=AsyncMock(return_value={}),
         )
         coordinator._get_cost_statistics_metadata = lambda: "metadata"
+        coordinator._warned_overlaps = set()
+        coordinator._warn_overlapping_invoices = (
+            lambda periods: ContratoAgua._warn_overlapping_invoices(
+                coordinator, periods
+            )
+        )
         coordinator.run = lambda: ContratoAgua._async_import_cost_statistics(
             coordinator
         )
@@ -238,6 +277,38 @@ class TestImportCostStatistics:
         stats = add_stats.call_args.args[2]
         assert len(stats) == 48
         assert stats[-1]["sum"] == pytest.approx(24.0)
+
+    async def test_warns_once_about_overlapping_invoices(self, caplog):
+        invoices = [
+            self._invoice("06-09-2026", "08-09-2026", 24.0),
+            self._invoice("06-09-2026", "08-09-2026", -24.0),
+        ]
+        coordinator = self._coordinator(invoices)
+
+        # Two daily checks: the warning is only logged the first time
+        for _ in range(2):
+            with (
+                patch(
+                    "custom_components.aigues_barcelona.sensor.get_db_instance",
+                    return_value=coordinator.hass,
+                ),
+                patch(
+                    "custom_components.aigues_barcelona.sensor.get_last_statistics",
+                    return_value={},
+                ),
+                patch(
+                    "custom_components.aigues_barcelona.sensor.dt_util.get_default_time_zone",
+                    return_value=MADRID,
+                ),
+                patch(
+                    "custom_components.aigues_barcelona.sensor.async_add_external_statistics"
+                ),
+            ):
+                await coordinator.run()
+
+        warnings = [r for r in caplog.records if "overlaps" in r.getMessage()]
+        assert len(warnings) == 1
+        assert "2026-09-06 - 2026-09-08" in warnings[0].getMessage()
 
     async def test_nothing_new(self):
         invoices = [self._invoice("06-09-2026", "08-09-2026", 24.0)]
